@@ -1,57 +1,627 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <title>Coin Maker TON Connect</title>
-  <script src="https://unpkg.com/@tonconnect/ui@2.0.8/dist/tonconnect-ui.min.js"></script>
-  <style>
-    body { font-family: Arial; display: flex; flex-direction: column; align-items: center; padding: 20px; }
-    button { padding: 10px 20px; margin-top: 10px; cursor: pointer; }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Coin Maker — Full</title>
+
+<!-- Firebase compat (Realtime DB + Auth) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+<!-- TonConnect UI -->
+<script src="https://unpkg.com/@tonconnect/ui@2.0.8/dist/tonconnect-ui.min.js"></script>
+
+<style>
+  :root{
+    --bg:#f5f7fb; --card:#fff; --accent:#1A73E8; --muted:#6c757d;
+    --green:#28A745; --red:#dc3545; --radius:12px;
+  }
+  body{margin:0;font-family:Inter, system-ui, Arial; background:var(--bg); color:#222}
+  header{background:#fff;padding:14px 18px;border-bottom:1px solid #eceef6;display:flex;align-items:center;gap:12px}
+  .title{font-weight:700;color:var(--accent)}
+  .top-right{margin-left:auto;display:flex;gap:12px;align-items:center}
+  .container{max-width:980px;margin:18px auto;padding-bottom:90px}
+  .card{background:var(--card);border-radius:var(--radius);padding:14px;margin-bottom:12px;box-shadow:0 6px 18px rgba(16,24,40,0.04)}
+  .row{display:flex;gap:12px}
+  .col{flex:1}
+  .muted{color:var(--muted);font-size:13px}
+  .btn{border:none;padding:10px 12px;border-radius:10px;cursor:pointer;color:#fff;background:linear-gradient(90deg,var(--accent),#6f42c1);font-weight:700}
+  .btn.green{background:var(--green)}
+  .btn.red{background:var(--red)}
+  .nav{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);display:flex;gap:8px;background:#fff;padding:8px;border-radius:18px;box-shadow:0 8px 30px rgba(16,24,40,0.08)}
+  .nav button{background:none;border:none;padding:8px 12px;border-radius:10px;cursor:pointer;color:var(--muted)}
+  .nav button.active{color:var(--accent);font-weight:700}
+  input,select{width:100%;padding:10px;border-radius:8px;border:1px solid #e6eaf5;background:#fbfdff}
+  .token-card{display:flex;justify-content:space-between;align-items:center;padding:10px;border-radius:10px;background:#fbfdff;margin-bottom:8px;border:1px solid #eef4ff}
+  .small{font-size:13px}
+  @media (max-width:720px){ .row{flex-direction:column} .nav{left:12px;transform:none} }
+</style>
+
 </head>
 <body>
-  <h1>Coin Maker Wallet</h1>
-  <div id="walletStatus">Кошелек не подключен</div>
-  <button id="connectWallet">Подключить TON Wallet</button>
-  <button id="sendTon" disabled>Отправить 0.1 TON</button>
+
+<header>
+  <div class="title">Coin Maker</div>
+  <div class="top-right">
+    <div id="tonconnect-root"></div>
+    <div style="text-align:right">
+      <div id="wallet-address" class="muted small">Кошелёк: —</div>
+      <div id="wallet-ton" style="font-weight:700">TON: 0.000000</div>
+    </div>
+  </div>
+</header>
+
+<div class="container">
+
+  <!-- HOME -->
+  <section id="tab-home" class="card">
+    <h3>Главная — Баланс</h3>
+    <div class="row">
+      <div class="col">
+        <div class="muted">TON баланс</div>
+        <div id="home-ton" style="font-size:20px;font-weight:700">0.000000</div>
+      </div>
+      <div class="col">
+        <div class="muted">Всего токенов</div>
+        <div id="home-tokens-count" style="font-size:20px;font-weight:700">0</div>
+      </div>
+      <div style="width:240px">
+        <div class="muted">Действия</div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button id="btn-deposit" class="btn">Пополнить TON</button>
+          <button id="btn-refresh" class="btn" style="background:#6c757d">Обновить</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MY TOKENS -->
+  <section id="tab-my-tokens" class="card" style="display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <h3 style="margin:0">Мои токены</h3>
+        <div class="muted small">Список токенов, которые вы создали или купили</div>
+      </div>
+      <div>
+        <button id="btn-create-token" class="btn green">Создать токен</button>
+      </div>
+    </div>
+    <div id="my-tokens-list" style="margin-top:12px"></div>
+  </section>
+
+  <!-- LISTING -->
+  <section id="tab-listing" class="card" style="display:none">
+    <h3>Листинг токенов (размещение)</h3>
+    <div class="muted small">Размещение платное: комиссия <b>1 TON</b>. При создании автоматически покупается доля создателя <b>0.5 TON</b>.</div>
+    <div style="margin-top:12px" class="row">
+      <div class="col"><input id="listing-name" placeholder="Название токена" /></div>
+      <div style="width:140px"><input id="listing-ticker" placeholder="Тикер (2-5)" /></div>
+    </div>
+    <div style="margin-top:8px" class="row">
+      <div class="col"><input id="listing-supply" type="number" placeholder="Общее количество (supply)" /></div>
+      <div style="width:160px"><input id="listing-price" type="number" step="0.000001" placeholder="Цена / 1 токен (TON)" /></div>
+    </div>
+    <div style="margin-top:10px;display:flex;gap:8px">
+      <button id="btn-place-listing" class="btn">Разместить (1 TON)</button>
+      <div class="muted small" id="listing-feedback" style="align-self:center"></div>
+    </div>
+  </section>
+
+  <!-- MARKET -->
+  <section id="tab-market" class="card" style="display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <h3 style="margin:0">Маркет</h3>
+        <div class="muted small">Покупка / продажа токенов</div>
+      </div>
+      <div style="width:320px"><input id="market-search" placeholder="Поиск по названию или тикеру" /></div>
+    </div>
+    <div id="market-list" style="margin-top:12px"></div>
+  </section>
+
+  <!-- TRANSFERS -->
+  <section id="tab-transfers" class="card" style="display:none">
+    <h3>Переводы токенов</h3>
+    <div class="muted small">Отправьте токены другому пользователю (по UID)</div>
+    <div style="margin-top:12px" class="row">
+      <div class="col"><select id="transfer-token-select"><option>Выберите токен</option></select></div>
+      <div style="width:160px"><input id="transfer-amount" type="number" placeholder="Количество" /></div>
+      <div style="width:220px"><input id="transfer-to" placeholder="UID получателя" /></div>
+      <div style="width:120px"><button id="btn-transfer" class="btn">Отправить</button></div>
+    </div>
+    <div id="transfer-history" style="margin-top:12px"></div>
+  </section>
+
+</div>
+
+<!-- Bottom nav -->
+<div class="nav" role="navigation" aria-label="Навигация">
+  <button data-tab="tab-home" class="active">🏠<br>Главная</button>
+  <button data-tab="tab-my-tokens">💰<br>Мои токены</button>
+  <button data-tab="tab-listing">📈<br>Листинг</button>
+  <button data-tab="tab-market">🛒<br>Маркет</button>
+  <button data-tab="tab-transfers">🔄<br>Переводы</button>
+</div>
 
 <script>
-  const OWNER_WALLET = "UQAmTM_EE8D6seecLKf-h8aXVQasliniDDQ52EvBj7PqExNr";
+/* =========================
+   Конфиг / константы
+   ========================= */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyD5i2c8M59NaOK5bbr1dZ1t711caPfetFQ",
+  authDomain: "coin-maker-5ca2b.firebaseapp.com",
+  databaseURL: "https://coin-maker-5ca2b-default-rtdb.firebaseio.com",
+  projectId: "coin-maker-5ca2b",
+  storageBucket: "coin-maker-5ca2b.firebasestorage.app",
+  messagingSenderId: "23493972632",
+  appId: "1:23493972632:web:fb85e0e342716c2856f6ed",
+  measurementId: "G-9KKV6R2259"
+};
 
-  // Инициализация TonConnect UI
-  const tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
-    manifestUrl: 'https://ton-connect.github.io/demo-dapp-with-react-ui/tonconnect-manifest.json',
-    buttonRootId: null
+const OWNER_TON_WALLET = 'UQAmTM_EE8D6seecLKf-h8aXVQasliniDDQ52EvBj7PqExNr';
+const START_PRICE = 0.001; // стартовая цена (TON/token)
+const MANDATORY_CREATOR_TON = 0.5;
+const LISTING_FEE = 1;
+const MIN_PRICE = 0.01;
+
+/* =========================
+   Инициализация Firebase (compat)
+   ========================= */
+firebase.initializeApp(FIREBASE_CONFIG);
+const auth = firebase.auth();
+const db = firebase.database();
+
+let uid = null;
+let localUser = { balances: { ton: 0 }, tokens: {} };
+
+/* =========================
+   Подключение TonConnect UI
+   ========================= */
+let tonConnectUI = null;
+(function initTonConnectUI(){
+  tonConnectUI = new window.TON_CONNECT_UI.TonConnectUI({
+    manifestUrl: window.location.origin + '/manifest.json', // optional
+    buttonRootId: 'tonconnect-root'                        // renders button automatically
+  });
+})();
+
+/* =========================
+   Аутентификация анонимная
+   ========================= */
+auth.signInAnonymously().then(userCred => {
+  uid = userCred.user.uid;
+  // ensure user node exists
+  const uRef = db.ref('users/' + uid);
+  uRef.once('value').then(snap=>{
+    if(!snap.exists()){
+      const base = { balances: { ton: 0 }, tokens: {}, createdAt: Date.now() };
+      uRef.set(base);
+    }
+    // подписываемся на изменения пользователя
+    uRef.on('value', snap2 => {
+      const v = snap2.val() || { balances: { ton:0 }, tokens: {} };
+      localUser = v;
+      renderBalances();
+      renderMyTokens();
+      renderMarket();
+      renderTransferOptions();
+    });
+  });
+});
+
+/* =========================
+   Навигация вкладок
+   ========================= */
+document.querySelectorAll('.nav button').forEach(btn=>{
+  btn.addEventListener('click', ()=> {
+    document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    const target = btn.dataset.tab;
+    document.querySelectorAll('.container section, .card, .container > section').forEach(()=>{}); // noop
+    document.querySelectorAll('[id^="tab-"]').forEach(el=>el.style.display='none');
+    document.getElementById(target).style.display = 'block';
+  });
+});
+// show default
+document.getElementById('tab-home').style.display = 'block';
+
+/* =========================
+   UI: Balances & wallet display
+   ========================= */
+function renderBalances(){
+  document.getElementById('home-ton').textContent = (localUser.balances?.ton || 0).toFixed(6);
+  const tokenCount = Object.values(localUser.tokens || {}).reduce((s,t)=> s + (Number(t.amount||0)), 0);
+  document.getElementById('home-tokens-count').textContent = tokenCount.toFixed(4);
+  document.getElementById('wallet-ton').textContent = 'TON: ' + (localUser.balances?.ton || 0).toFixed(6);
+  // wallet-address managed by TonConnect UI button automatically
+}
+
+/* =========================
+   CREATE token (button)
+   - opens prompt, creates temporary local token or starts listing flow
+   ========================= */
+document.getElementById('btn-create-token').addEventListener('click', async ()=>{
+  const name = prompt('Название токена:');
+  if(!name) return;
+  const ticker = prompt('Тикер (2-5 символов):');
+  if(!ticker || ticker.length < 2 || ticker.length > 5) return alert('Неверный тикер');
+  // For quick creation: we will create minimal token with mandatory creator purchase at START_PRICE
+  const tickerU = ticker.toUpperCase();
+
+  // Check balance: need at least MANDATORY_CREATOR_TON + small safety (we do creation without listing fee)
+  const userTon = Number(localUser.balances?.ton || 0);
+  if(userTon < MANDATORY_CREATOR_TON) return alert('Недостаточно TON для обязательной покупки доли (0.5 TON)');
+
+  // Deduct mandatory TON in transaction
+  const tonRef = db.ref('users/' + uid + '/balances/ton');
+  tonRef.transaction(curr => {
+    const cur = Number(curr || 0);
+    if(cur < MANDATORY_CREATOR_TON) return; // abort
+    return +(cur - MANDATORY_CREATOR_TON).toFixed(6);
+  }, async (err, committed, snapshot) => {
+    if(err || !committed) return alert('Не удалось списать TON для покупки доли');
+    // create token node with initial supply equal to creator amount (we'll mint amountFromMandatory)
+    const amountFromMandatory = MANDATORY_CREATOR_TON / START_PRICE; // e.g. 0.5 / 0.001 = 500
+    const tokenObj = {
+      name,
+      ticker: tickerU,
+      totalSupply: 0, // no public supply yet (creator kept initial)
+      price: START_PRICE,
+      owner: uid,
+      createdAt: Date.now()
+    };
+    await db.ref('tokens/' + tickerU).set(tokenObj);
+    // give tokens to creator
+    await db.ref('users/' + uid + '/tokens/' + tickerU).set({
+      name, ticker: tickerU, amount: amountFromMandatory, price: START_PRICE
+    });
+    // increase price according to formula
+    const newPrice = Math.max(MIN_PRICE, START_PRICE * (1 + 0.01 * amountFromMandatory));
+    await db.ref('tokens/' + tickerU + '/price').set(newPrice);
+    await db.ref('users/' + uid + '/tokens/' + tickerU + '/price').set(newPrice);
+    alert(`Токен ${tickerU} создан. Вам зачислено ${Math.floor(amountFromMandatory)} ${tickerU} (за ${MANDATORY_CREATOR_TON} TON).`);
+  });
+});
+
+/* =========================
+   PLACE listing (full listing with supply+price) -> requires LISTING_FEE + MANDATORY_CREATOR_TON on balance
+   - deduct both from user's TON
+   - create token in tokens/{ticker}
+   - allocate mandatory creator tokens to user
+   - reduce token.totalSupply by creator allocation
+   - bump price
+   ========================= */
+document.getElementById('btn-place-listing').addEventListener('click', async ()=>{
+  const name = document.getElementById('listing-name').value.trim();
+  const tickerRaw = document.getElementById('listing-ticker').value.trim().toUpperCase();
+  const supply = Number(document.getElementById('listing-supply').value);
+  const price = Number(document.getElementById('listing-price').value);
+
+  if(!name || !tickerRaw || !supply || !price) return alert('Заполните все поля корректно');
+  if(tickerRaw.length < 2 || tickerRaw.length > 5) return alert('Тикер 2–5 символов');
+
+  // Check token not exists
+  const tokenSnap = await db.ref('tokens/' + tickerRaw).get();
+  if(tokenSnap.exists()) return alert('Токен с таким тикером уже существует');
+
+  // Need LISTING_FEE + MANDATORY_CREATOR_TON
+  const need = LISTING_FEE + MANDATORY_CREATOR_TON;
+  const tonRef = db.ref('users/' + uid + '/balances/ton');
+  tonRef.transaction(curr => {
+    const cur = Number(curr || 0);
+    if(cur < need) return; // abort
+    return +(cur - need).toFixed(6);
+  }, async (err, committed, snapshot) => {
+    if(err || !committed) return alert('Недостаточно TON для размещения (нужны комиссия + обязательная доля)');
+    // create token record
+    const creatorAllocation = MANDATORY_CREATOR_TON / START_PRICE; // tokens given to creator
+    const remainingSupply = Math.max(0, supply - creatorAllocation);
+    const tokenObj = {
+      name,
+      ticker: tickerRaw,
+      totalSupply: remainingSupply,
+      price: price,
+      owner: uid,
+      createdAt: Date.now()
+    };
+    await db.ref('tokens/' + tickerRaw).set(tokenObj);
+    // allocate to user's tokens
+    await db.ref('users/' + uid + '/tokens/' + tickerRaw).set({
+      name, ticker: tickerRaw, amount: creatorAllocation, price: price
+    });
+    // bump price after creator buy
+    const newPrice = Math.max(MIN_PRICE, price * (1 + 0.01 * creatorAllocation));
+    await db.ref('tokens/' + tickerRaw + '/price').set(newPrice);
+    await db.ref('users/' + uid + '/tokens/' + tickerRaw + '/price').set(newPrice);
+    document.getElementById('listing-feedback').textContent = `✅ Размещено ${tickerRaw}. Вам зачислено ${Math.floor(creatorAllocation)} ${tickerRaw}`;
+    renderMarket();
+  });
+});
+
+/* =========================
+   MARKET render & buy/sell
+   ========================= */
+document.getElementById('market-search').addEventListener('input', renderMarket);
+
+async function renderMarket(){
+  const root = document.getElementById('market-list');
+  root.innerHTML = '';
+  const snap = await db.ref('tokens').get();
+  const tokens = snap.exists() ? snap.val() : {};
+  const q = document.getElementById('market-search').value.trim().toLowerCase();
+
+  if(Object.keys(tokens).length === 0){
+    root.innerHTML = '<div class="muted small">Маркет пуст</div>'; return;
+  }
+
+  for(const key of Object.keys(tokens)){
+    const t = tokens[key];
+    if(q && !( (t.name||'').toLowerCase().includes(q) || (t.ticker||'').toLowerCase().includes(q) )) continue;
+    const div = document.createElement('div');
+    div.className = 'token-card';
+    div.innerHTML = `
+      <div>
+        <div style="font-weight:700">${t.name} (${t.ticker || key})</div>
+        <div class="muted small">Цена: ${(Number(t.price||START_PRICE)).toFixed(6)} TON • Supply: ${Number(t.totalSupply||0).toFixed(4)}</div>
+      </div>
+      <div style="text-align:right;min-width:260px">
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <input placeholder="TON для покупки (0.01)" style="width:140px" data-input-tn="${key}" />
+          <button class="btn green" data-buy="${key}">Купить</button>
+          <button class="btn red" data-sell="${key}">Продать</button>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn" style="background:#e9eefc;color:#123" data-preview="${key}">Сколько за 0.01 TON?</button>
+        </div>
+      </div>
+    `;
+    root.appendChild(div);
+
+    // handlers
+    div.querySelector('[data-buy]').addEventListener('click', async (e)=>{
+      const k = e.currentTarget.getAttribute('data-buy');
+      const input = div.querySelector(`[data-input-tn="${k}"]`);
+      let tonToSpend = Number(input.value) || 0.01;
+      await buyToken(k, tonToSpend);
+    });
+
+    div.querySelector('[data-sell]').addEventListener('click', async (e)=>{
+      const k = e.currentTarget.getAttribute('data-sell');
+      const amount = Number(prompt('Сколько токенов продать?'));
+      if(!amount || amount <= 0) return;
+      await sellToken(k, amount);
+    });
+
+    div.querySelector('[data-preview]').addEventListener('click', ()=> {
+      const p = Number(t.price || START_PRICE);
+      const amt = 0.01 / p;
+      alert(`За 0.01 TON получите ≈ ${amt.toFixed(6)} ${t.ticker || key} (цена ${p.toFixed(6)} TON)`);
+    });
+  }
+}
+
+/* BUY: atomically deduct TON from user, add tokens to user, decrease supply, bump price */
+async function buyToken(tickerKey, tonToSpend){
+  if(tonToSpend <= 0) return alert('Неверная сумма');
+  // load token
+  const tokenSnap = await db.ref('tokens/' + tickerKey).get();
+  if(!tokenSnap.exists()) return alert('Токен не найден');
+  const token = tokenSnap.val();
+  const price = Number(token.price || START_PRICE);
+  let desiredAmount = tonToSpend / price;
+
+  // transaction: deduct TON from user
+  const tonRef = db.ref('users/' + uid + '/balances/ton');
+  const tonTx = await new Promise(resolve => {
+    tonRef.transaction(curr => {
+      const cur = Number(curr || 0);
+      if(cur < tonToSpend) return; // abort
+      return +(cur - tonToSpend).toFixed(6);
+    }, (err, committed, snapshot) => resolve({err,committed,snapshot}));
+  });
+  if(!tonTx.committed) return alert('Недостаточно TON на балансе');
+
+  // cap by available supply if defined
+  if(typeof token.totalSupply !== 'undefined' && token.totalSupply !== null){
+    if(Number(token.totalSupply) < desiredAmount){
+      desiredAmount = Number(token.totalSupply);
+      if(desiredAmount <= 0) return alert('Доступного supply нет');
+      // adjust spent TON to real amount
+      tonToSpend = desiredAmount * price;
+    }
+  }
+
+  // add tokens to user's tokens entry
+  const userTokenRef = db.ref('users/' + uid + '/tokens/' + tickerKey);
+  await new Promise(res => {
+    userTokenRef.transaction(cur => {
+      if(!cur) return { name: token.name, ticker: tickerKey, amount: desiredAmount, price: price };
+      cur.amount = Number(cur.amount || 0) + desiredAmount;
+      cur.price = price;
+      return cur;
+    }, (err,committed,snap)=> res({err,committed,snap}));
   });
 
-  let walletInfo = null;
+  // decrease token.totalSupply and bump price atomically
+  const tokenRef = db.ref('tokens/' + tickerKey);
+  await new Promise(res => {
+    tokenRef.transaction(cur => {
+      if(!cur) return;
+      if(typeof cur.totalSupply !== 'undefined' && cur.totalSupply !== null) cur.totalSupply = Number(cur.totalSupply) - desiredAmount;
+      const oldPrice = Number(cur.price || price);
+      const newPrice = Math.max(MIN_PRICE, oldPrice * (1 + 0.01 * desiredAmount));
+      cur.price = newPrice;
+      return cur;
+    }, (err,committed,snap)=> res({err,committed,snap}));
+  });
 
-  document.getElementById("connectWallet").onclick = async () => {
-    try {
-      walletInfo = await tonConnectUI.connectWallet();
-      document.getElementById("walletStatus").innerText = "Кошелек подключен: " + walletInfo.account;
-      document.getElementById("sendTon").disabled = false;
-    } catch (e) {
-      alert("Не удалось подключить кошелек: " + e);
-    }
-  };
+  alert(`Куплено ${desiredAmount.toFixed(6)} ${tickerKey} за ${tonToSpend.toFixed(6)} TON`);
+}
 
-  document.getElementById("sendTon").onclick = async () => {
-    if (!walletInfo) return alert("Подключите кошелек");
+/* SELL: remove tokens from user, credit TON, increase supply, decrease price */
+async function sellToken(tickerKey, amountToSell){
+  if(amountToSell <= 0) return alert('Неверное количество');
+  const userTokenRef = db.ref('users/' + uid + '/tokens/' + tickerKey);
+  // decrement user's tokens atomically
+  const tokenTx = await new Promise(res => {
+    userTokenRef.transaction(cur => {
+      if(!cur || Number(cur.amount||0) < amountToSell) return; // abort
+      cur.amount = Number(cur.amount || 0) - amountToSell;
+      return cur;
+    }, (err,committed,snap)=> res({err,committed,snap}));
+  });
+  if(!tokenTx.committed) return alert('Недостаточно токенов');
 
-    try {
-      await tonConnectUI.sendTransaction({
-        validUntil: Math.floor(Date.now() / 1000) + 600,
-        messages: [{
-          address: OWNER_WALLET,
-          amount: (0.1 * 1e9).toString() // 0.1 TON
-        }]
-      });
-      alert("Транзакция отправлена!");
-    } catch (e) {
-      alert("Ошибка транзакции: " + e);
-    }
-  };
+  // get token price
+  const tokenSnap = await db.ref('tokens/' + tickerKey).get();
+  if(!tokenSnap.exists()) return alert('Токен не найден');
+  const token = tokenSnap.val();
+  const price = Number(token.price || START_PRICE);
+  const tonToCredit = amountToSell * price;
+
+  // credit TON to user
+  const tonRef = db.ref('users/' + uid + '/balances/ton');
+  await new Promise(res => {
+    tonRef.transaction(curr => {
+      const cur = Number(curr || 0);
+      return +(cur + tonToCredit).toFixed(6);
+    }, (err,committed,snap)=> res({err,committed,snap}));
+  });
+
+  // increase token supply and lower price
+  const tokenRef = db.ref('tokens/' + tickerKey);
+  await new Promise(res => {
+    tokenRef.transaction(cur => {
+      if(!cur) return;
+      if(typeof cur.totalSupply !== 'undefined' && cur.totalSupply !== null) cur.totalSupply = Number(cur.totalSupply) + amountToSell;
+      const oldPrice = Number(cur.price || price);
+      const newPrice = Math.max(MIN_PRICE, oldPrice * (1 - 0.01 * amountToSell));
+      cur.price = newPrice;
+      return cur;
+    }, (err,committed,snap)=> res({err,committed,snap}));
+  });
+
+  alert(`Продано ${amountToSell} ${tickerKey}, зачислено ${tonToCredit.toFixed(6)} TON`);
+}
+
+/* =========================
+   TRANSFERS
+   ========================= */
+document.getElementById('btn-transfer').addEventListener('click', async ()=>{
+  const ticker = document.getElementById('transfer-token-select').value;
+  const amount = Number(document.getElementById('transfer-amount').value);
+  const to = document.getElementById('transfer-to').value.trim();
+  if(!ticker || ticker === 'Выберите токен') return alert('Выберите токен');
+  if(!to) return alert('Укажите UID получателя');
+  if(!amount || amount <= 0) return alert('Неверное количество');
+
+  const senderRef = db.ref('users/' + uid + '/tokens/' + ticker);
+  // deduct
+  const sendTx = await new Promise(res => {
+    senderRef.transaction(cur => {
+      if(!cur || Number(cur.amount || 0) < amount) return; // abort
+      cur.amount = Number(cur.amount || 0) - amount;
+      return cur;
+    }, (err,committed,snap)=> res({err,committed,snap}));
+  });
+  if(!sendTx.committed) return alert('Недостаточно токенов для пересылки');
+
+  // credit recipient
+  const recvRef = db.ref('users/' + to + '/tokens/' + ticker);
+  await new Promise(res => {
+    recvRef.transaction(cur => {
+      if(!cur) return { name: sendTx.snapshot.val().name || ticker, ticker, amount: amount, price: sendTx.snapshot.val().price || START_PRICE };
+      cur.amount = Number(cur.amount || 0) + amount;
+      return cur;
+    }, (err,committed,snap)=> res({err,committed,snap}));
+  });
+
+  alert(`Переведено ${amount} ${ticker} пользователю ${to}`);
+  renderTransferOptions();
+});
+
+/* populate transfer tokens select */
+function renderTransferOptions(){
+  const sel = document.getElementById('transfer-token-select');
+  sel.innerHTML = '<option>Выберите токен</option>';
+  for(const k of Object.keys(localUser.tokens || {})){
+    const t = localUser.tokens[k];
+    const opt = document.createElement('option');
+    opt.value = k;
+    opt.textContent = `${k} — ${t.name} (${Number(t.amount||0).toFixed(4)})`;
+    sel.appendChild(opt);
+  }
+}
+
+/* =========================
+   Deposit via TonConnect UI
+   - opens wallet UI to send TON to OWNER_TON_WALLET
+   - for demo: we simulate immediate credit of 90% (commission)
+   - PRODUCTION: you must verify on server side and credit only after on-chain confirmation
+   ========================= */
+document.getElementById('btn-deposit').addEventListener('click', async ()=>{
+  try{
+    await tonConnectUI.connectWallet();
+  }catch(e){ /* ignore if already opened*/ }
+
+  const amt = Number(prompt('Сумма депозита в TON (1..100)'));
+  if(!amt || amt < 1 || amt > 100) return alert('Введите сумму от 1 до 100 TON');
+
+  const nanotons = (BigInt(Math.round(amt * 1e9))).toString();
+  try{
+    await tonConnectUI.sendTransaction({
+      validUntil: Math.floor(Date.now()/1000) + 600,
+      messages: [{ address: OWNER_TON_WALLET, amount: nanotons }]
+    });
+  }catch(e){
+    console.error(e);
+    return alert('Ошибка отправки транзакции через кошелёк: ' + (e.message || e));
+  }
+
+  // DEMO: credit 90% immediately
+  const credited = +( (amt * 0.9).toFixed(6) );
+  const tonRef = db.ref('users/' + uid + '/balances/ton');
+  await new Promise(res => {
+    tonRef.transaction(curr => { const c = Number(curr || 0); return +(c + credited).toFixed(6); }, (err,committed,snap)=> res({err,committed,snap}));
+  });
+  alert(`Депозит отправлен. На баланс (демо) зачислено ${credited} TON (комиссия 10%). В продакшене зачисление — после серверной проверки on-chain.`);
+});
+
+/* =========================
+   Helper: initial renders
+   ========================= */
+function renderMyTokens(){
+  const root = document.getElementById('my-tokens-list');
+  root.innerHTML = '';
+  const tokens = localUser.tokens || {};
+  if(Object.keys(tokens).length === 0){
+    root.innerHTML = '<div class="muted small">У вас пока нет токенов</div>'; return;
+  }
+  for(const k of Object.keys(tokens)){
+    const t = tokens[k];
+    const el = document.createElement('div');
+    el.className = 'token-card';
+    el.innerHTML = `<div>
+      <div style="font-weight:700">${t.name} (${t.ticker || k})</div>
+      <div class="muted small">Кол-во: ${Number(t.amount||0).toFixed(6)}</div>
+    </div>
+    <div style="text-align:right">
+      <div class="muted small">Цена: ${Number(t.price||START_PRICE).toFixed(6)} TON</div>
+      <div style="margin-top:8px">
+        <button class="btn" data-buy-self="${k}" style="background:#e6f7ee;color:#123;padding:6px;border-radius:8px">Купить за 0.01 TON</button>
+      </div>
+    </div>`;
+    root.appendChild(el);
+    el.querySelector('[data-buy-self]').addEventListener('click', ()=> buyToken(k, 0.01));
+  }
+  renderTransferOptions();
+}
+
+renderMarket(); // initial
+renderTransferOptions();
+
 </script>
 </body>
 </html>
